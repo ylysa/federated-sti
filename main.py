@@ -15,3 +15,4 @@ if __name__ == '__main__':
     server.mount('/api', api_server)
     server.mount('/web', web_server)
     server.run(host='localhost', port=5000)
+

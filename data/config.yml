@@ -1,0 +1,12 @@
+federated_sti:
+  dataset:
+    train: 'first_client.vcf'
+    labels: 'integrated_call_samples.20130502.ALL.ped'
+  fed_hyper_params:
+    NUM_EPOCHS: 1000,
+    BATCH_SIZE_BASE: 2,
+    BATCH_SIZE: 5,
+    N_SPLITS: 3
+
+  model:
+    name: 'models.py'

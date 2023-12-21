@@ -1,1 +1,6 @@
 featurecloud
+bios
+tensorflow
+scikit-learn
+tensorflow_addons
+tqdm
