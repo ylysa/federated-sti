@@ -184,16 +184,11 @@ class ComputeState(AppState):
         K.clear_session()
         callbacks = self.create_callbacks()
         model = self.load('model')
-        weights = self.load('weights')
-        if weights is not None:
-            model.layers[-1].set_weights(weights)
-        self.log(train_dataset)
         history = model.fit(train_dataset, steps_per_epoch=steps_per_epoch, epochs=NUM_EPOCHS,
             validation_data=valid_dataset,
             validation_steps=validation_steps,
             callbacks=callbacks, verbose=1)
-        weights = model.layers[-1].get_weights()
-        self.send_data_to_coordinator(weights, send_to_self=True)
+        self.send_data_to_coordinator(model, send_to_self=True)
         iteration = self.load('iteration')
         iteration += 1
         self.store("iteration", iteration)
@@ -209,9 +204,8 @@ class ObtainWeights(AppState):
     self.register_transition("compute", Role.BOTH)
 
   def run(self):
-    updated_weights = self.await_data(n = 1)
-    self.log(updated_weights)
-    self.store("weights", updated_weights)
+    updated_model = self.await_data(n = 1)
+    self.store('model', updated_model)
     return "compute"
 
 
@@ -222,17 +216,33 @@ class AggregateState(AppState):
         self.register_transition('obtain_weights', Role.COORDINATOR)
         self.register_transition("terminal", Role.COORDINATOR)
 
+    def aggregate_weights(self, model_list, layer_index):
+        parameters = []
+        biases = []
+        all_weights = []
+        for i in range(len(model_list)):
+            model_weights = model_list[i].layers[layer_index].get_weights()
+            model_weights = [np.array(w) for w in model_weights]
+
+            if i == 0:
+                all_weights = [[] for _ in range(len(model_weights))]
+            for j in range(len(model_weights)):
+                all_weights[j].append(model_weights[j])
+        updated_weights = [np.mean(weights, axis=0) for weights in all_weights]
+        return updated_weights
+
     def run(self):
         self.log("Start aggregation")
-        aggregated_model = self.aggregate_data()
-
-        updated_weights = aggregated_model / len(self.clients)
+        data = self.gather_data()
+        model = data[0]
+        model.layers[0].set_weights(self.aggregate_weights(data, 0))
+        model.layers[-1].set_weights(self.aggregate_weights(data, -1))
         iteration = self.load("iteration")
         N_SPLITS = self.load('N_SPLITS')
         if iteration >= N_SPLITS:
             return 'terminal'
         else:
-            self.broadcast_data(updated_weights, send_to_self = True)
+            self.broadcast_data(model, send_to_self = True)
             return 'obtain_weights'
 
 @app_state('write')
