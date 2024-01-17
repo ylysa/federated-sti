@@ -6,7 +6,6 @@ import tensorflow as tf
 import pandas as pd
 import math
 import numpy as np
-import allel
 import tensorflow.keras.backend as K
 from models.model import SplitTransformer
 from models.loss import MyCustomLoss
@@ -18,8 +17,6 @@ from sklearn.model_selection import KFold,StratifiedKFold
 from tensorflow.keras.utils import to_categorical
 import tensorflow_addons as tfa
 from tensorflow import keras
-from scipy.spatial.distance import squareform
-
 from tqdm import tqdm
 
 @app_state('initial')
@@ -47,31 +44,16 @@ class InitialState(AppState):
         CONFIG_FILE = "config.yml"
         file_path = f"/mnt/input/{CONFIG_FILE}"
         config_f = bios.read(file_path)
-        new_data_header = ""
-        genotypes = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['train']}", comment='#', sep='\t', header = 1, index_col='Sample_id', dtype={'Sample_id':str})
-        headers = genotypes.columns[:]
-        self.save('headers', headers)
-        pedigree = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['labels']}",  sep='\t', index_col='Individual ID')
-        Y_train = pedigree.loc[genotypes.index]['Population']
+        X = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['train']}", index_col=0)
+        headers = X.columns[:]
+        self.store('headers', headers)
+        Y_train = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['labels']}", index_col=0).squeeze("columns")
         self.store('Y_train', Y_train)
-        X = genotypes[genotypes.index.isin(Y_train.index)]
-        X = X.replace({
-            '0|0': 0,
-            '0|1': 1,
-            '1|0': 2,
-            '1|1': 3
-        })
         self.store('feature_size', X.shape[1])
         self.store('chunk_size', X.shape[1])
-        r = allel.rogers_huff_r(X.T)
-        LD = squareform(r ** 2)
-        bins = [0, 0.2, 0.4, 0.6, 0.8, 1]
-        LD_max_freqs = np.amax(LD, axis=1)
-        bin_labels = np.digitize(LD_max_freqs, bins=bins, right=True)
-        self.store('bin_labels', bin_labels)
         fold = 0
         self.store('fold', fold)
-        _x = X[X.index.isin(Y_train.index)].to_numpy()
+        _x = X.to_numpy()
         _y = Y_train.to_numpy()
         self.store('_x', _x)
         self.store('_y', _y)
@@ -83,7 +65,7 @@ class InitialState(AppState):
         model = self.create_model()
         self.store('model', model)
         self.store('weights', None)
-        self.save('accuracies', [])
+        self.store('accuracies', [])
         return 'compute'
 
 @app_state('compute')
@@ -160,7 +142,6 @@ class ComputeState(AppState):
 
         return callbacks
 
-
     def run(self):
         self.log("Start computation")
         feature_size = self.load('feature_size')
@@ -179,6 +160,7 @@ class ComputeState(AppState):
         _x = self.load('_x')
         _y = self.load('_y')
         train_index, test_index = next(kf.split(_x))
+        self.store('test_index', test_index)
         fold = self.load('fold')
         fold += 1
         self.store('fold', fold)
@@ -250,30 +232,34 @@ class AggregateState(AppState):
         return updated_weights
 
     def evaluate(self, model):
+        self.log("EVALUATION")
         for missing_perc in [0.05, 0.1, 0.2]:
-            save_name = f"/mnt/output/Chr.22.DELS/STI/preds_mixed_mr_{missing_perc}_rs_{fold}_.csv"
+            self.log("ITERATION")
+            fold = self.load('fold')
+            save_name = f"/mnt/output/preds_mixed_mr_{missing_perc}_rs_{fold}_.csv"
+            save_name_numpy = f"/mnt/output/preds_mixed_mr_{missing_perc}_rs_{fold}"
             avg_accuracy = []
             preds = []
             true_labels = []
             test_dataset = self.load('test_dataset')
+            to_save_array = np.zeros((test_dataset[0].shape[0], test_dataset[0].shape[1]), dtype=object)
             test_X_missing = np.empty((test_dataset[0].shape[0] * 2, test_dataset[0].shape[1]), dtype=test_dataset[0].dtype)
-            predict_onehots = model.predict(test_X_missing, verbose=0)
-            map_values_1_vec = np.vectorize(map_values_1)
-            map_values_2_vec = np.vectorize(map_values_2)
+            map_values_1_vec = np.vectorize(self.map_values_1)
+            map_values_2_vec = np.vectorize(self.map_values_2)
             test_X_missing[0::2] = map_values_1_vec(test_dataset[0])
             test_X_missing[1::2] = map_values_2_vec(test_dataset[0])
             test_X_missing = to_categorical(test_X_missing, 3)
             fold = self.load('fold')
             x_train = self.load('x_train')
-            bin_labels = self.load('bin_labels')
             for i in tqdm(range(test_dataset[0].shape[0])):
                 missing_index, _ = train_test_split(np.arange(x_train.shape[1]), train_size=missing_perc,
-                                                    random_state=i + fold, shuffle=True, stratify=bin_labels)
+                                                   random_state=i + fold, shuffle=True)
                 test_X_missing[i*2:i*2+2, missing_index, :] = [0, 0, 1]
             predict_onehots = model.predict(test_X_missing, verbose=0)
+            np.save(save_name_numpy, predict_onehots, allow_pickle=False)
             for i in tqdm(range(test_dataset[0].shape[0])):
                 missing_index, _ = train_test_split(np.arange(x_train.shape[1]), train_size=missing_perc, random_state=i + fold,
-                                                shuffle=True, stratify=bin_labels)
+                                                shuffle=True)
                 predict_missing_onehot = predict_onehots[i*2:(i+1)*2, missing_index, :]
                 predict_missing = np.argmax(predict_missing_onehot, axis=2)
                 predict_missing_final = np.zeros((1, predict_missing.shape[1]))
@@ -309,9 +295,10 @@ class AggregateState(AppState):
                 avg_accuracy.append(accuracy)
             Y_train = self.load('Y_train')
             headers = self.load('headers')
+            test_index = self.load('test_index')
             df = pd.DataFrame(to_save_array, columns= headers[:], index = Y_train.index[test_index])
             df.to_csv(save_name)
-            log_msg = 'The average imputation accuracy on test data with {} missing genotypes is {:.4f}: '.format(missing_perc, np.mean(avg_accuracy))
+            log_msg = 'The average imputation accuracy on test data with {} missing genotypes is {:.4f}. '.format(missing_perc, np.mean(avg_accuracy))
             self.log(log_msg)
             cnf_matrix = confusion_matrix(true_labels, preds)
             FP = cnf_matrix.sum(axis=0) - np.diag(cnf_matrix)
@@ -324,10 +311,13 @@ class AggregateState(AppState):
             TN = TN.astype(float)
             TPR = TP/(TP+FN)
             TNR = TN/(TN+FP)
+            self.log(f"Sensitivity: {np.mean(TPR)}")
+            self.log(f"Specificity: {np.mean(TNR)}")
+            self.log(f"F1-score macro: {f1_score(true_labels, preds, average='macro')}")
+            self.log(f"F1-score micro: {f1_score(true_labels, preds, average='micro')}")
             accuracies = self.load('accuracies')
             accuracies.append(np.mean(avg_accuracy))
-            self.save('accuracies', accuracies)
-
+            self.store('accuracies', accuracies)
 
     def run(self):
         self.log("Start aggregation")
@@ -339,18 +329,8 @@ class AggregateState(AppState):
         iteration = self.load("iteration")
         N_SPLITS = self.load('N_SPLITS')
         if iteration >= N_SPLITS:
-            model.save('mnt/output/trained_model')
+            model.save_weights('mnt/output/trained_model_weights')
             return 'terminal'
         else:
             self.broadcast_data(model, send_to_self = True)
             return 'obtain_weights'
-
-@app_state('write')
-class WriteState(AppState):
-
-    def register(self):
-        self.register_transition('terminal')
-
-    def run(self):
-        self.log("Write results")
-        return 'terminal'

@@ -4,5 +4,3 @@ tensorflow
 scikit-learn
 tensorflow_addons
 tqdm
-scikit-allel
-scipy
