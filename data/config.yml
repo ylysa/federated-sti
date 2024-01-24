@@ -2,13 +2,15 @@ federated_sti:
   dataset:
     train: 'X.csv'
     labels: 'Y_train.csv'
+    test: 'X_test.csv'
+    test_labels: 'Y_test.csv'
   fed_hyper_params:
     NUM_EPOCHS: 1000,
     BATCH_SIZE_BASE: 2,
     BATCH_SIZE: 5,
     N_SPLITS: 3
-  split:
-    mode: file,
-    dir: .
+  logic:
+    mode: "file"
+    dir: "."
   model:
     name: 'models.py'

@@ -13,11 +13,11 @@ from sklearn import metrics
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix, f1_score, mean_squared_error
 from sklearn.linear_model import LassoCV, ElasticNetCV
-from sklearn.model_selection import KFold,StratifiedKFold
 from tensorflow.keras.utils import to_categorical
 import tensorflow_addons as tfa
 from tensorflow import keras
 from tqdm import tqdm
+from utils import evaluate_model
 
 @app_state('initial')
 class InitialState(AppState):
@@ -44,28 +44,24 @@ class InitialState(AppState):
         CONFIG_FILE = "config.yml"
         file_path = f"/mnt/input/{CONFIG_FILE}"
         config_f = bios.read(file_path)
+        self.store('config_f', config_f)
         X = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['train']}", index_col=0)
-        headers = X.columns[:]
-        self.store('headers', headers)
         Y_train = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['labels']}", index_col=0).squeeze("columns")
         self.store('Y_train', Y_train)
         self.store('feature_size', X.shape[1])
         self.store('chunk_size', X.shape[1])
-        fold = 0
-        self.store('fold', fold)
-        _x = X.to_numpy()
+        _x = X.to_numpy(dtype=np.int32)
         _y = Y_train.to_numpy()
         self.store('_x', _x)
         self.store('_y', _y)
-        N_SPLITS=2
-        self.store('N_SPLITS', N_SPLITS)
         self.store('iteration', 0)
-        kf = KFold(n_splits=N_SPLITS, shuffle=True, random_state=2022)
-        self.store('kf', kf)
         model = self.create_model()
         self.store('model', model)
-        self.store('weights', None)
-        self.store('accuracies', [])
+       # physical_devices = tf.config.list_physical_devices('GPU')
+       # if len(physical_devices) == 0:
+       #     raise RuntimeError("No GPU devices found.")
+       # else:
+       #     tf.config.experimental.set_memory_growth(physical_devices[0], True)
         return 'compute'
 
 @app_state('compute')
@@ -78,9 +74,9 @@ class ComputeState(AppState):
     @tf.function()
     def add_attention_mask(self, X_sample, y_sample):
       depth = 3
-      mask_size = tf.cast(X_sample.shape[0]*0.5, dtype=tf.int64)
+      mask_size = tf.cast(X_sample.shape[0]*0.5, dtype=tf.int32)
       mask_idx = tf.reshape(tf.random.shuffle(tf.range(X_sample.shape[0]))[:mask_size], (-1, 1))
-      updates = tf.math.add(tf.ones(shape=(mask_idx.shape[0]), dtype=tf.int64), 1)
+      updates = tf.math.add(tf.ones(shape=(mask_idx.shape[0]), dtype=tf.int32), 1)
       X_masked = tf.tensor_scatter_nd_update(X_sample, mask_idx, updates)
       return tf.one_hot(X_masked, depth), tf.one_hot(y_sample, depth-1)
 
@@ -119,7 +115,7 @@ class ComputeState(AppState):
 
       return dataset
 
-    def create_callbacks(self, kfold=0, metric = "val_loss"):
+    def create_callbacks(self, metric = "val_loss"):
         reducelr = tf.keras.callbacks.ReduceLROnPlateau(
             monitor= metric,
             mode='auto',
@@ -141,6 +137,8 @@ class ComputeState(AppState):
                      earlystop]
 
         return callbacks
+    def evaluate(self, model, mode, test_dataset, test_Y):
+        evaluate_model(self, model, mode, test_dataset, test_Y)
 
     def run(self):
         self.log("Start computation")
@@ -154,23 +152,13 @@ class ComputeState(AppState):
         attention_range = 0
         chunk_size = self.load('chunk_size')
         missing_perc = 0.1
-        NUM_EPOCHS = 1
-        kf = self.load('kf')
-        BATCH_SIZE = 5
+        NUM_EPOCHS = 50
+        BATCH_SIZE = 2
         _x = self.load('_x')
         _y = self.load('_y')
-        train_index, test_index = next(kf.split(_x))
-        self.store('test_index', test_index)
-        fold = self.load('fold')
-        fold += 1
-        self.store('fold', fold)
-        Y_train = self.load('Y_train')
-        x_train, y_train, test_dataset, test_indices = _x[train_index], _y[train_index], (_x[test_index], _y[test_index]),Y_train.index[test_index]
-        self.store('test_dataset', test_dataset)
-        x_train, x_valid, y_train, y_valid = train_test_split(x_train, y_train, test_size=0.10,
-                                              random_state=fold,
-                                              shuffle=True)
-        self.store('x_train', x_train)
+        x_train, x_valid, y_train, y_valid = train_test_split(_x, _y, test_size=0.10,
+                                            random_state=1,
+                                            shuffle=True)
         steps_per_epoch = 2*x_train.shape[0]//BATCH_SIZE
         validation_steps = 2*x_valid.shape[0]//BATCH_SIZE
         train_dataset = self.get_dataset(x_train, 0, feature_size, 0, 0, BATCH_SIZE)
@@ -181,12 +169,13 @@ class ComputeState(AppState):
         history = model.fit(train_dataset, steps_per_epoch=steps_per_epoch, epochs=NUM_EPOCHS,
             validation_data=valid_dataset,
             validation_steps=validation_steps,
-            callbacks=callbacks, verbose=1)
+            callbacks=callbacks, verbose=1, batch_size=5)
+        test_dataset = self.load('test_dataset')
+        test_Y = self.load('test_Y')
         self.send_data_to_coordinator(model, send_to_self=True)
         iteration = self.load('iteration')
         iteration += 1
         self.store("iteration", iteration)
-        self.store('kf', kf)
         if self.is_coordinator:
             return "aggregate"
         else:
@@ -230,105 +219,24 @@ class AggregateState(AppState):
                 all_weights[j].append(model_weights[j])
         updated_weights = [np.mean(weights, axis=0) for weights in all_weights]
         return updated_weights
-
-    def evaluate(self, model):
-        self.log("EVALUATION")
-        for missing_perc in [0.05, 0.1, 0.2]:
-            self.log("ITERATION")
-            fold = self.load('fold')
-            save_name = f"/mnt/output/preds_mixed_mr_{missing_perc}_rs_{fold}_.csv"
-            save_name_numpy = f"/mnt/output/preds_mixed_mr_{missing_perc}_rs_{fold}"
-            avg_accuracy = []
-            preds = []
-            true_labels = []
-            test_dataset = self.load('test_dataset')
-            to_save_array = np.zeros((test_dataset[0].shape[0], test_dataset[0].shape[1]), dtype=object)
-            test_X_missing = np.empty((test_dataset[0].shape[0] * 2, test_dataset[0].shape[1]), dtype=test_dataset[0].dtype)
-            map_values_1_vec = np.vectorize(self.map_values_1)
-            map_values_2_vec = np.vectorize(self.map_values_2)
-            test_X_missing[0::2] = map_values_1_vec(test_dataset[0])
-            test_X_missing[1::2] = map_values_2_vec(test_dataset[0])
-            test_X_missing = to_categorical(test_X_missing, 3)
-            fold = self.load('fold')
-            x_train = self.load('x_train')
-            for i in tqdm(range(test_dataset[0].shape[0])):
-                missing_index, _ = train_test_split(np.arange(x_train.shape[1]), train_size=missing_perc,
-                                                   random_state=i + fold, shuffle=True)
-                test_X_missing[i*2:i*2+2, missing_index, :] = [0, 0, 1]
-            predict_onehots = model.predict(test_X_missing, verbose=0)
-            np.save(save_name_numpy, predict_onehots, allow_pickle=False)
-            for i in tqdm(range(test_dataset[0].shape[0])):
-                missing_index, _ = train_test_split(np.arange(x_train.shape[1]), train_size=missing_perc, random_state=i + fold,
-                                                shuffle=True)
-                predict_missing_onehot = predict_onehots[i*2:(i+1)*2, missing_index, :]
-                predict_missing = np.argmax(predict_missing_onehot, axis=2)
-                predict_missing_final = np.zeros((1, predict_missing.shape[1]))
-                for j in range(predict_missing.shape[1]):
-                    if predict_missing[:, j].tolist() == [0, 0]:
-                        predict_missing_final[:, j] = 0
-                    elif predict_missing[:, j].tolist() == [0, 1]:
-                        predict_missing_final[:, j] = 1
-                    elif predict_missing[:, j].tolist() == [1, 0]:
-                        predict_missing_final[:, j] = 2
-                    elif predict_missing[:, j].tolist() == [1, 1]:
-                        predict_missing_final[:, j] = 3
-                    else:
-                        predict_missing_final[:, j] = 4
-                preds.extend(predict_missing_final.ravel().tolist())
-                predict_haplotypes = np.argmax(predict_onehots[i*2:(i+1)*2], axis=2)
-                for j in range(predict_onehots.shape[1]):
-                    if predict_haplotypes[:, j].tolist() == [0,0]:
-                        to_save_array[i, j] = '0|0'
-                    elif predict_haplotypes[:, j].tolist() == [0,1]:
-                        to_save_array[i, j] = '0|1'
-                    elif predict_haplotypes[:, j].tolist() == [1,0]:
-                        to_save_array[i, j] = '1|0'
-                    elif predict_haplotypes[:, j].tolist() == [1, 1]:
-                        to_save_array[i, j] = '1|1'
-                    else:
-                        to_save_array[i, j] = '.|.'
-                label_missing_onehot = test_dataset[0][i:i + 1, missing_index]
-                label_missing = test_dataset[0][i:i + 1, missing_index]
-                true_labels.extend(label_missing.ravel().tolist())
-                correct_prediction = np.equal(predict_missing_final, label_missing)
-                accuracy = np.mean(correct_prediction)
-                avg_accuracy.append(accuracy)
-            Y_train = self.load('Y_train')
-            headers = self.load('headers')
-            test_index = self.load('test_index')
-            df = pd.DataFrame(to_save_array, columns= headers[:], index = Y_train.index[test_index])
-            df.to_csv(save_name)
-            log_msg = 'The average imputation accuracy on test data with {} missing genotypes is {:.4f}. '.format(missing_perc, np.mean(avg_accuracy))
-            self.log(log_msg)
-            cnf_matrix = confusion_matrix(true_labels, preds)
-            FP = cnf_matrix.sum(axis=0) - np.diag(cnf_matrix)
-            FN = cnf_matrix.sum(axis=1) - np.diag(cnf_matrix)
-            TP = np.diag(cnf_matrix)
-            TN = cnf_matrix.sum() - (FP + FN + TP)
-            FP = FP.astype(float)
-            FN = FN.astype(float)
-            TP = TP.astype(float)
-            TN = TN.astype(float)
-            TPR = TP/(TP+FN)
-            TNR = TN/(TN+FP)
-            self.log(f"Sensitivity: {np.mean(TPR)}")
-            self.log(f"Specificity: {np.mean(TNR)}")
-            self.log(f"F1-score macro: {f1_score(true_labels, preds, average='macro')}")
-            self.log(f"F1-score micro: {f1_score(true_labels, preds, average='micro')}")
-            accuracies = self.load('accuracies')
-            accuracies.append(np.mean(avg_accuracy))
-            self.store('accuracies', accuracies)
-
+    def evaluate(self, model, mode, test_dataset, test_Y):
+        evaluate_model(self, model, mode, test_dataset, test_Y)
     def run(self):
         self.log("Start aggregation")
         data = self.gather_data()
+        config_f = self.load('config_f')
+        test_X = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['test']}", index_col=0)
+        test_Y = pd.read_csv(f"/mnt/input/{config_f['federated_sti']['dataset']['test_labels']}", index_col=0).squeeze("columns")
+        test_dataset = (test_X.to_numpy(dtype=np.int32), test_Y.to_numpy())
+        #for i, model in enumerate(data):
+            #self.evaluate(model, "local" + str(i), test_dataset, test_Y)
         model = data[0]
+        self.evaluate(model, "local", test_dataset, test_Y)
         model.layers[0].set_weights(self.aggregate_weights(data, 0))
         model.layers[-1].set_weights(self.aggregate_weights(data, -1))
-        self.evaluate(model)
+        self.evaluate(model, "aggregated", test_dataset, test_Y)
         iteration = self.load("iteration")
-        N_SPLITS = self.load('N_SPLITS')
-        if iteration >= N_SPLITS:
+        if iteration >= 1:
             model.save_weights('mnt/output/trained_model_weights')
             return 'terminal'
         else:
