@@ -17,33 +17,33 @@ X = genotypes.replace({
 })
 
 region_mapping = {
-    'CHB': 'EAS',
-    'CHD': 'EAS',
-    'JPT': 'EAS',
-    'KHV': 'EAS',
-    'CHS': 'EAS',
-    'CDX': 'EAS',
-    'ACB': 'AFR',
-    'LWK': 'AFR',
-    'YRI': 'AFR',
-    'GWD': 'AFR',
-    'MSL': 'AFR',
-    'ESN': 'AFR',
+    'ACB': 'OTH',
+    'LWK': 'OTH',
+    'YRI': 'OTH',
+    'GWD': 'OTH',
+    'MSL': 'OTH',
+    'ESN': 'OTH',
     'CEU': 'EUR',
     'GBR': 'EUR',
     'FIN': 'EUR',
     'IBS': 'EUR',
     'TSI': 'EUR',
-    'MXL': 'AMR',
-    'PUR': 'AMR',
-    'CLM': 'AMR',
-    'PEL': 'AMR',
-    'ASW': 'AMR',
-    'GIH': 'SAS',
-    'ITU': 'SAS',
-    'BEB': 'SAS',
-    'STU': 'SAS',
-    'PJL': 'SAS',
+    'MXL': 'OTH',
+    'PUR': 'OTH',
+    'CLM': 'OTH',
+    'PEL': 'OTH',
+    'ASW': 'OTH',
+    'CHB': 'AS',
+    'CHD': 'OTH',
+    'JPT': 'AS',
+    'KHV': 'AS',
+    'CHS': 'AS',
+    'CDX': 'AS',
+    'GIH': 'OTH',
+    'ITU': 'EUR',
+    'BEB': 'AS',
+    'STU': 'EUR',
+    'PJL': 'AS',
 }
 
 pedigree['Region'] = pedigree['Population'].map(region_mapping)
@@ -55,11 +55,11 @@ for region in unique_regions:
     current_region_indices = pedigree[pedigree['Region'] == region].index
     current_X = X[X.index.isin(current_region_indices)]
     current_Y_train = pedigree.loc[current_X.index]['Population']
-    train_X, test_X, train_Y, test_Y = train_test_split(current_X, current_Y_train, test_size=0.1, random_state=42)
+    train_X, test_X, train_Y, test_Y = train_test_split(current_X, current_Y_train, test_size=0.2, random_state=42)
     train_X.to_csv(f"{region}_X_train.csv")
     train_Y.to_csv(f"{region}_Y_train.csv")
-    combined_test_X = pd.concat([combined_test_X, test_X], ignore_index=True)
-    combined_test_Y = pd.concat([combined_test_Y, test_Y], ignore_index=True)
+    combined_test_X = pd.concat([combined_test_X, test_X])
+    combined_test_Y = pd.concat([combined_test_Y, test_Y])
 
 combined_test_X.to_csv("test_X.csv")
 combined_test_Y.to_csv("test_Y.csv")

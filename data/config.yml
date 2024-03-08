@@ -4,8 +4,9 @@ federated_sti:
     labels: 'Y_train.csv'
     test: 'X_test.csv'
     test_labels: 'Y_test.csv'
+    bin_labels: 'bin_labels.csv'
   fed_hyper_params:
-    NUM_EPOCHS: 1000,
+    NUM_EPOCHS: 10,
     BATCH_SIZE_BASE: 2,
     BATCH_SIZE: 5,
     N_SPLITS: 3
