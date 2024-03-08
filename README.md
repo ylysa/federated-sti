@@ -1,35 +1,34 @@
 # FeatureCloud App 
 
-### Run federated-sti
+### Run fed-impute-sequencing-learner
 
 #### Prerequisite
 
-To run federated-sti, you should install Docker and FeatureCloud pip package:
+To run fed-impute-sequencing-learner, you should install Docker and FeatureCloud pip package:
 
 ```shell
 pip install featurecloud
 ```
 
-Then either download federated-sti image from the FeatureCloud docker repository:
+Then either download fed-impute-sequencing-learner image from the FeatureCloud docker repository:
 
 ```shell
-featurecloud app download featurecloud.ai/federated-sti
+featurecloud app download featurecloud.ai/fed-impute-sequencing-learner
 ```
 
 Or build the app locally:
 
 ```shell
-featurecloud app build featurecloud.ai/federated-sti
+featurecloud app build featurecloud.ai/fed-impute-sequencing-learner
 ```
 
-#### Run federated-sti in the test-bed
+#### Run fed-impute-sequencing-learner in the test-bed
 
-You can run federated-sti as a standalone app in the [FeatureCloud test-bed](https://featurecloud.ai/development/test) or [FeatureCloud Workflow](https://featurecloud.ai/projects). You can also run the app using CLI:
+You can run fed-impute-sequencing-learner as a standalone app in the [FeatureCloud test-bed](https://featurecloud.ai/development/test) or [FeatureCloud Workflow](https://featurecloud.ai/projects). You can also run the app using CLI:
 
 ```shell
-featurecloud test start --app-image featurecloud.ai/federated-sti --client-dirs=client1, client2, client3
+featurecloud test start --app-image featurecloud.ai/fed-impute-sequencing-learner --client-dirs=client1, client2, client3
 ```
-
 ## Model Architecture
 
 The architecture of the Split-Transformer Impute (STI) model used in this project is based on the work by Mowlaei, Li, Chen, Jamialahmadi, Kumar, Rebbeck and Shi [1].
