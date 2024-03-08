@@ -1,6 +1,13 @@
-# FeatureCloud App 
+# Description
 
-### Run fed-impute-sequencing-learner
+Federated learning for imputing SNP data. The architecture of the Split-Transformer Impute (STI) model used in this project is based on the work by Mowlaei, Li, Chen, Jamialahmadi, Kumar, Rebbeck and Shi [1].
+
+# Input
+The model does not rely on a specific file format, as long as the inputs are one-hot encoded. Otherwise, preprocessing is required, similar to the preprocessing.py file.
+
+# Output
+The imputation results are saved in CSV files.
+# Run fed-impute-sequencing-learner
 
 #### Prerequisite
 
@@ -29,9 +36,6 @@ You can run fed-impute-sequencing-learner as a standalone app in the [FeatureClo
 ```shell
 featurecloud test start --app-image featurecloud.ai/fed-impute-sequencing-learner --client-dirs=client1, client2, client3
 ```
-## Model Architecture
-
-The architecture of the Split-Transformer Impute (STI) model used in this project is based on the work by Mowlaei, Li, Chen, Jamialahmadi, Kumar, Rebbeck and Shi [1].
 
 ### References
 <a id="1">[1]</a>
