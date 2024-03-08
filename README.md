@@ -30,10 +30,11 @@ You can run federated-sti as a standalone app in the [FeatureCloud test-bed](htt
 featurecloud test start --app-image featurecloud.ai/federated-sti --client-dirs=client1, client2, client3
 ```
 
+## Model Architecture
 
+The architecture of the Split-Transformer Impute (STI) model used in this project is based on the work by Mowlaei, Li, Chen, Jamialahmadi, Kumar, Rebbeck and Shi [1].
 
 ### References
-<a id="1">[1]</a> 
-Matschinske, J., Späth, J., Nasirigerdeh, R., Torkzadehmahani, R., Hartebrodt, A., Orbán, B., Fejér, S., Zolotareva,
-O., Bakhtiari, M., Bihari, B. and Bloice, M., 2021.
-The FeatureCloud AI Store for Federated Learning in Biomedicine and Beyond. arXiv preprint arXiv:2105.05734.
+<a id="1">[1]</a>
+Mohammad Erfan Mowlaei, Chong Li, Junjie Chen, Benyamin Jamialahmadi, Sudhir Kumar, Timothy Richard Rebbeck, Xinghua Shi, 2023.
+bioRxiv 2023.03.05.531190; doi: https://doi.org/10.1101/2023.03.05.531190
