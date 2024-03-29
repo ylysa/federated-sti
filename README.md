@@ -2,6 +2,9 @@
 
 Federated learning for imputing SNP data. The architecture of the Split-Transformer Impute (STI) model used in this project is based on the work by Mowlaei, Li, Chen, Jamialahmadi, Kumar, Rebbeck and Shi [1].
 
+# Data
+The DELL.chr22.genotypes.for.modeling.vcf dataset can be downloaded from https://github.com/Mycheaux/STI/blob/main/data/STI_benchmark_datasets.zip.
+
 # Input
 The model does not rely on a specific file format, as long as the inputs are one-hot encoded. Otherwise, preprocessing is required, similar to the preprocessing.py file.
 
